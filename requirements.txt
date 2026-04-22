@@ -1,0 +1,3 @@
+# No third-party dependencies required.
+# Solar position math is implemented from first principles (NOAA algorithm).
+# Optional: add pvlib, astropy, or ephem for higher-accuracy ephemeris in the future.
