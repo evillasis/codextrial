@@ -31,6 +31,9 @@ class ExposureResult:
     altitude_m: float = 0.0
     operating_hours: tuple = (0.0, 24.0)
     store_type: str = "medianera"       # "medianera" | "esquinera"
+    # Clear-sky irradiance (Meinel DNI model)
+    vertical_irradiance_kwh_m2_year: float = 0.0
+    vertical_irradiance_kwh_m2_year_operating_hours: float = 0.0
 
     def summary(self) -> str:
         month_names = [
@@ -46,7 +49,28 @@ class ExposureResult:
             f"Peak single day  : {self.peak_daily_hours:.1f} h",
             f"Energy score     : {self.weighted_score:.0f}  (intensity-weighted hours)",
         ]
+        if self.vertical_irradiance_kwh_m2_year > 0:
+            line = (
+                f"Clear-sky irrad. : {self.vertical_irradiance_kwh_m2_year:.0f} kWh/m²·year"
+            )
+            oh = self.vertical_irradiance_kwh_m2_year_operating_hours
+            if oh > 0 and oh != self.vertical_irradiance_kwh_m2_year:
+                line += f"  (op. hours: {oh:.0f} kWh/m²·year)"
+            lines.append(line)
         return "\n".join(lines)
+
+
+def _meinel_vertical_irradiance(elevation_deg: float, angle_to_facade_deg: float) -> float:
+    """
+    Clear-sky DNI (Meinel model) projected onto a vertical facade (W/m²).
+
+    DNI = 1367 × 0.7^(AM^0.678)  with Kasten-Young air mass.
+    Facade component = DNI × cos(elevation) × cos(angle_to_facade).
+    """
+    el_r = math.radians(elevation_deg)
+    am = 1.0 / (math.sin(el_r) + 0.50572 * (elevation_deg + 6.07995) ** (-1.6364))
+    dni = 1367.0 * (0.7 ** (am ** 0.678))
+    return max(0.0, dni * math.cos(el_r) * math.cos(math.radians(angle_to_facade_deg)))
 
 
 class ExposureCalculator:
@@ -82,6 +106,8 @@ class ExposureCalculator:
         annual_hours = 0.0
         weighted_score = 0.0
         peak_daily_hours = 0.0
+        irr_full_wh = 0.0   # Wh/m² — all daylight hours, post-obstruction
+        irr_oh_wh = 0.0     # Wh/m² — operating hours only
 
         start = datetime(self.year, 1, 1, tzinfo=timezone.utc)
         end = datetime(self.year + 1, 1, 1, tzinfo=timezone.utc)
@@ -106,22 +132,33 @@ class ExposureCalculator:
                         t += step_hour
                         continue
 
-                    # Guard 2: operating hours filter (local solar time)
-                    if store_profile and store_profile.operating_hours != (0.0, 24.0):
-                        local_h = (
-                            t.hour + t.minute / 60.0 + building.longitude / 15.0
-                        ) % 24
-                        oh_start, oh_end = store_profile.operating_hours
-                        if not (oh_start <= local_h < oh_end):
+                    angle_to_facade = building.angle_to_sun(pos["azimuth"])
+                    if angle_to_facade < 90:
+                        el_deg = pos["elevation"]
+                        el_r = math.radians(el_deg)
+                        intensity = (
+                            math.cos(math.radians(angle_to_facade)) * math.sin(el_r)
+                        )
+                        irr_sample = (
+                            _meinel_vertical_irradiance(el_deg, angle_to_facade)
+                            * self.hour_step
+                        )
+                        irr_full_wh += irr_sample
+
+                        # Guard 2: operating hours filter (local solar time)
+                        in_oh = True
+                        if store_profile and store_profile.operating_hours != (0.0, 24.0):
+                            local_h = (
+                                t.hour + t.minute / 60.0 + building.longitude / 15.0
+                            ) % 24
+                            oh_start, oh_end = store_profile.operating_hours
+                            in_oh = oh_start <= local_h < oh_end
+
+                        if not in_oh:
                             t += step_hour
                             continue
 
-                    angle_to_facade = building.angle_to_sun(pos["azimuth"])
-                    if angle_to_facade < 90:
-                        intensity = (
-                            math.cos(math.radians(angle_to_facade))
-                            * math.sin(math.radians(pos["elevation"]))
-                        )
+                        irr_oh_wh += irr_sample
 
                         # Guard 3: peak-hour weighting (opt-in)
                         weight = 1.0
@@ -158,12 +195,16 @@ class ExposureCalculator:
         if self.day_step > 1:
             annual_hours *= self.day_step
             weighted_score *= self.day_step
+            irr_full_wh *= self.day_step
+            irr_oh_wh *= self.day_step
 
         return {
             "annual_hours": annual_hours,
             "peak_daily_hours": peak_daily_hours,
             "monthly_avg": monthly_avg,
             "weighted_score": weighted_score,
+            "irr_full_wh": irr_full_wh,
+            "irr_oh_wh": irr_oh_wh,
         }
 
     def calculate(self, building: Building, store_profile=None) -> ExposureResult:
@@ -218,17 +259,29 @@ class ExposureCalculator:
                 / total_area
                 for i in range(12)
             ]
+            irr_full_wh = (
+                primary["irr_full_wh"] * p_area + secondary["irr_full_wh"] * s_area
+            ) / total_area
+            irr_oh_wh = (
+                primary["irr_oh_wh"] * p_area + secondary["irr_oh_wh"] * s_area
+            ) / total_area
         else:
             annual_hours = primary["annual_hours"]
             peak_daily_hours = primary["peak_daily_hours"]
             raw_weighted_score = primary["weighted_score"]
             monthly_avg = primary["monthly_avg"]
+            irr_full_wh = primary["irr_full_wh"]
+            irr_oh_wh = primary["irr_oh_wh"]
 
         # Altitude correction: configurable boost per 300 m.
         altitude_m = store_profile.altitude_m if store_profile else 0.0
         boost = self.config["altitude"]["boost_factor_per_300m"]
         altitude_factor = (1.0 + boost) ** (altitude_m / 300.0)
         weighted_score = raw_weighted_score * altitude_factor
+
+        # Apply altitude boost to irradiance and convert Wh → kWh.
+        irr_kwh_year = irr_full_wh * altitude_factor / 1000.0
+        irr_kwh_year_oh = irr_oh_wh * altitude_factor / 1000.0
 
         peak_month = monthly_avg.index(max(monthly_avg)) + 1
 
@@ -246,4 +299,6 @@ class ExposureCalculator:
                 store_profile.operating_hours if store_profile else (0.0, 24.0)
             ),
             store_type=store_type,
+            vertical_irradiance_kwh_m2_year=round(irr_kwh_year, 1),
+            vertical_irradiance_kwh_m2_year_operating_hours=round(irr_kwh_year_oh, 1),
         )
