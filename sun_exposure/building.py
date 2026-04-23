@@ -8,8 +8,8 @@ A street running E-W has facades facing N (0°) or S (180°).
 """
 
 import math
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 
 CARDINAL = {
@@ -18,6 +18,66 @@ CARDINAL = {
     "S": 180, "SSW": 202.5, "SW": 225, "WSW": 247.5,
     "W": 270, "WNW": 292.5, "NW": 315, "NNW": 337.5,
 }
+
+
+@dataclass
+class ObstructionProfile:
+    """
+    Simplified horizon model for a site (mountains, neighbouring buildings, etc.).
+
+    Each obstruction entry is (azimuth_start, azimuth_end, blocking_elevation_angle):
+      - azimuth_start/end: compass degrees (0–360, clockwise from N)
+      - blocking_elevation_angle: sun at or below this elevation is blocked in this sector
+
+    Supports wrap-around sectors: azimuth_start=350, azimuth_end=10 covers due North.
+
+    Examples
+    --------
+    Mountain to the west blocking sun below 20°:
+        ObstructionProfile([(250, 300, 20)])
+
+    Tall building to the NE blocking sun below 35°:
+        ObstructionProfile([(30, 60, 35)])
+    """
+
+    obstructions: List[Tuple[float, float, float]] = field(default_factory=list)
+
+    def is_blocked(self, sun_azimuth: float, sun_elevation: float) -> bool:
+        """Return True if the sun is hidden behind an obstruction at this site."""
+        for az_start, az_end, block_el in self.obstructions:
+            if az_start <= az_end:
+                in_sector = az_start <= sun_azimuth <= az_end
+            else:                           # wrap-around e.g. 350–10
+                in_sector = sun_azimuth >= az_start or sun_azimuth <= az_end
+            if in_sector and sun_elevation <= block_el:
+                return True
+        return False
+
+
+@dataclass
+class StoreProfile:
+    """
+    Retail-specific site properties for a sun exposure analysis.
+
+    All fields have neutral defaults that reproduce the baseline behaviour
+    (no filtering, no weighting, no altitude correction, no obstructions).
+
+    Parameters
+    ----------
+    altitude_m        : metres above sea level; raises UV/irradiance ~4% per 300 m
+    operating_hours   : (start_h, end_h) in local solar time; default (0, 24) = all hours
+    peak_windows      : list of (start_h, end_h, weight) — higher weight during busy periods
+    apply_peak_weights: must be True to activate peak_windows; default False (opt-in)
+    obstructions      : horizon profile for mountains or nearby buildings
+    """
+
+    altitude_m: float = 0.0
+    operating_hours: Tuple[float, float] = (0.0, 24.0)
+    peak_windows: List[Tuple[float, float, float]] = field(
+        default_factory=lambda: [(13.0, 15.0, 1.5), (18.0, 20.0, 1.3)]
+    )
+    apply_peak_weights: bool = False
+    obstructions: ObstructionProfile = field(default_factory=ObstructionProfile)
 
 
 @dataclass
@@ -60,7 +120,7 @@ def facade_from_street_angle(
     street_angle: float,
     side: str = "both",
     address: str = "",
-) -> list["Building"]:
+) -> list:
     """
     Given a street running at `street_angle` degrees from North, return one or
     two Building objects representing the facades on each side of the street.
@@ -87,7 +147,7 @@ def facade_from_cardinal(
     longitude: float,
     direction: str,
     address: str = "",
-) -> "Building":
+) -> Building:
     """
     Create a Building whose facade faces the given cardinal direction string.
     E.g. direction="SW" → facade_azimuth=225°.

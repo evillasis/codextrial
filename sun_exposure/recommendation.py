@@ -36,6 +36,7 @@ def recommend_protection(result: ExposureResult) -> Recommendation:
     """
     Produce a 3M sun-protection recommendation from an ExposureResult.
     The score used is the intensity-weighted annual score normalised per day.
+    Altitude correction is already baked into result.weighted_score.
     """
     daily_score = result.weighted_score / 365
 
@@ -95,6 +96,25 @@ def format_report(result: ExposureResult, rec: Recommendation) -> str:
         f" Protect?    : {'YES — film recommended' if rec.protect else 'NO — film not necessary'}",
         f" Film type   : {rec.film_type}",
         f" Reason      : {rec.reason}",
-        separator,
     ]
+
+    # Retail context section — only shown when non-default values are present
+    context_lines = []
+
+    if result.altitude_m > 0:
+        context_lines.append(
+            f" Altitude        : {result.altitude_m:.0f} m  "
+            f"(intensity factor ×{result.altitude_factor:.2f})"
+        )
+
+    oh_start, oh_end = result.operating_hours
+    if (oh_start, oh_end) != (0.0, 24.0):
+        context_lines.append(
+            f" Operating hours : {oh_start:04.1f} – {oh_end:04.1f} local solar time"
+        )
+
+    if context_lines:
+        lines += ["", " --- Site Context ---"] + context_lines
+
+    lines.append(separator)
     return "\n".join(lines)

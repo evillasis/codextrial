@@ -8,6 +8,7 @@ Samples sun position every hour for every day of the year, accumulates
 import math
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .solar_position import SolarPosition
 from .building import Building
@@ -21,6 +22,11 @@ class ExposureResult:
     peak_month: int              # month (1–12) with highest average daily exposure
     monthly_avg_hours: list      # [avg daily hours per month], index 0=Jan
     weighted_score: float        # energy-weighted score (accounts for sun intensity)
+    # Optional fields — neutral defaults preserve backward compatibility
+    raw_weighted_score: float = 0.0     # weighted_score before altitude correction
+    altitude_factor: float = 1.0        # 1.0 = no altitude correction
+    altitude_m: float = 0.0
+    operating_hours: tuple = (0.0, 24.0)
 
     def summary(self) -> str:
         month_names = [
@@ -55,7 +61,15 @@ class ExposureCalculator:
         self.hour_step = hour_step
         self.day_step = day_step
 
-    def calculate(self, building: Building) -> ExposureResult:
+    def calculate(self, building: Building, store_profile=None) -> ExposureResult:
+        """
+        Calculate annual sun exposure for a building facade.
+
+        store_profile : StoreProfile | None
+            When None (default), runs the baseline calculation with no
+            operating-hour filtering, no peak weighting, and no altitude
+            correction — identical to the original behaviour.
+        """
         solar = SolarPosition(building.latitude, building.longitude)
 
         monthly_totals = [0.0] * 12     # sum of daily hours per month
@@ -80,15 +94,45 @@ class ExposureCalculator:
             while t < day + timedelta(days=1):
                 pos = solar.position(t)
                 if pos["is_daylight"]:
+
+                    # Guard 1: obstruction (mountain or nearby building)
+                    if store_profile and store_profile.obstructions.is_blocked(
+                        pos["azimuth"], pos["elevation"]
+                    ):
+                        t += step_hour
+                        continue
+
+                    # Guard 2: operating hours filter (local solar time)
+                    if store_profile and store_profile.operating_hours != (0.0, 24.0):
+                        local_h = (
+                            t.hour + t.minute / 60.0 + building.longitude / 15.0
+                        ) % 24
+                        oh_start, oh_end = store_profile.operating_hours
+                        if not (oh_start <= local_h < oh_end):
+                            t += step_hour
+                            continue
+
                     angle_to_facade = building.angle_to_sun(pos["azimuth"])
                     if angle_to_facade < 90:
-                        # Sun shines on this facade; intensity ~ cos(angle) * sin(elevation)
                         intensity = (
                             math.cos(math.radians(angle_to_facade))
                             * math.sin(math.radians(pos["elevation"]))
                         )
+
+                        # Guard 3: peak-hour weighting (opt-in)
+                        weight = 1.0
+                        if store_profile and store_profile.apply_peak_weights:
+                            local_h = (
+                                t.hour + t.minute / 60.0 + building.longitude / 15.0
+                            ) % 24
+                            for pw_start, pw_end, pw_weight in store_profile.peak_windows:
+                                if pw_start <= local_h < pw_end:
+                                    weight = pw_weight
+                                    break
+
                         daily_hours += self.hour_step
-                        daily_weighted += intensity * self.hour_step
+                        daily_weighted += intensity * weight * self.hour_step
+
                 t += step_hour
 
             monthly_totals[month_idx] += daily_hours
@@ -112,6 +156,12 @@ class ExposureCalculator:
             annual_hours *= scale
             weighted_score *= scale
 
+        # Altitude correction: +4% solar irradiance per 300 m (thinner atmosphere).
+        altitude_m = store_profile.altitude_m if store_profile else 0.0
+        altitude_factor = 1.04 ** (altitude_m / 300.0)
+        raw_weighted_score = weighted_score
+        weighted_score *= altitude_factor
+
         peak_month = monthly_avg.index(max(monthly_avg)) + 1
 
         return ExposureResult(
@@ -121,4 +171,10 @@ class ExposureCalculator:
             peak_month=peak_month,
             monthly_avg_hours=monthly_avg,
             weighted_score=weighted_score,
+            raw_weighted_score=raw_weighted_score,
+            altitude_factor=altitude_factor,
+            altitude_m=altitude_m,
+            operating_hours=(
+                store_profile.operating_hours if store_profile else (0.0, 24.0)
+            ),
         )
