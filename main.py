@@ -35,6 +35,7 @@ RETAIL STORE ANALYSIS
 import argparse
 import sys
 from datetime import datetime
+from sun_exposure.batch import process_batch
 
 from sun_exposure import (
     Building,
@@ -133,6 +134,30 @@ def parse_args():
         default=None,
         metavar="PATH",
         help="Path to a custom YAML config file (requires pyyaml). Overrides recommendation thresholds and peak windows.",
+    )
+
+    # --- Batch mode ---
+    batch = p.add_argument_group("batch mode (process a CSV file of locations)")
+    batch.add_argument(
+        "--batch",
+        type=str,
+        default=None,
+        metavar="INPUT_CSV",
+        help="Path to input CSV. When set, all other flags are ignored and output goes to --output.",
+    )
+    batch.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        metavar="OUTPUT_CSV",
+        help="Path for batch output CSV (required with --batch).",
+    )
+    batch.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        metavar="N",
+        help="Number of parallel workers for batch geocoding (default: 4).",
     )
 
     # --- Simulation settings ---
@@ -303,6 +328,18 @@ def _resolve_orientation(args, lat, lon, parser) -> list:
 
 def main():
     parser, args = parse_args()
+
+    # 0. Batch mode — short-circuits all single-location logic
+    if args.batch:
+        if not args.output:
+            parser.error("--output is required when --batch is used.")
+        cfg = load_config(args.config)
+        calc = ExposureCalculator(
+            year=args.year, hour_step=1.0, day_step=args.day_step, config=cfg
+        )
+        n = process_batch(args.batch, args.output, calc=calc, config=cfg, max_workers=args.workers)
+        print(f"Processed {n} rows → {args.output}")
+        return
 
     # 1. Resolve coordinates
     lat, lon = _resolve_location(args, parser)
