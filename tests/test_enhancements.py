@@ -210,6 +210,53 @@ class TestObstructionInExposure:
 
 
 # ---------------------------------------------------------------------------
+# Clear-sky kWh irradiance (Meinel model)
+# ---------------------------------------------------------------------------
+
+class TestIrradiance:
+    def test_south_madrid_irradiance_plausible_range(self):
+        # Meinel clear-sky vertical irradiance for Madrid south facade:
+        # literature values are roughly 900–1400 kWh/m²·year.
+        result = ExposureCalculator(year=2025, day_step=7).calculate(
+            Building(*MADRID, 180.0), StoreProfile()
+        )
+        assert 800 < result.vertical_irradiance_kwh_m2_year < 1600
+
+    def test_south_beats_north_irradiance(self):
+        # South facade receives far more irradiance than north in northern hemisphere.
+        calc = ExposureCalculator(year=2025, day_step=7)
+        r_s = calc.calculate(Building(*MADRID, 180.0), StoreProfile())
+        r_n = calc.calculate(Building(*MADRID, 0.0), StoreProfile())
+        assert r_s.vertical_irradiance_kwh_m2_year > r_n.vertical_irradiance_kwh_m2_year * 5
+
+    def test_altitude_increases_irradiance(self):
+        calc = ExposureCalculator(year=2025, day_step=14)
+        r_sea   = calc.calculate(Building(*BOGOTA, 180.0), StoreProfile(altitude_m=0.0))
+        r_bogota = calc.calculate(Building(*BOGOTA, 180.0), StoreProfile(altitude_m=2600.0))
+        assert r_bogota.vertical_irradiance_kwh_m2_year > r_sea.vertical_irradiance_kwh_m2_year
+
+    def test_operating_hours_irradiance_le_full_year(self):
+        result = ExposureCalculator(year=2025, day_step=14).calculate(
+            Building(*MADRID, 180.0), StoreProfile(operating_hours=(11.0, 21.0))
+        )
+        assert result.vertical_irradiance_kwh_m2_year_operating_hours <= result.vertical_irradiance_kwh_m2_year
+
+    def test_full_day_oh_equals_full_irradiance(self):
+        result = ExposureCalculator(year=2025, day_step=14).calculate(
+            Building(*MADRID, 180.0), StoreProfile(operating_hours=(0.0, 24.0))
+        )
+        assert result.vertical_irradiance_kwh_m2_year == pytest.approx(
+            result.vertical_irradiance_kwh_m2_year_operating_hours, rel=1e-6
+        )
+
+    def test_no_profile_irradiance_populated(self):
+        result = ExposureCalculator(year=2025, day_step=7).calculate(
+            Building(*MADRID, 180.0)
+        )
+        assert result.vertical_irradiance_kwh_m2_year > 0
+
+
+# ---------------------------------------------------------------------------
 # Esquinera (corner store — two facades)
 # ---------------------------------------------------------------------------
 

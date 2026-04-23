@@ -145,6 +145,12 @@ def format_report(
             f" Operating hours : {oh_start:04.1f} – {oh_end:04.1f} local solar time"
         )
 
+    if result.vertical_irradiance_kwh_m2_year > 0:
+        context_lines.append(
+            f" Clear-sky note  : Irradiance uses Meinel/Kasten-Young clear-sky model"
+            " (no cloud cover). Actual values will be lower."
+        )
+
     if context_lines:
         lines += ["", " --- Site Context ---"] + context_lines
 
