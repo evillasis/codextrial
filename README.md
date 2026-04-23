@@ -340,3 +340,116 @@ tests/
   test_enhancements.py     22 tests — retail store features
   test_geo.py              20 tests — geo lookups (all HTTP mocked)
 ```
+
+---
+
+## Future developments
+
+### Batch processing — CSV input / output
+
+Accept a CSV file where each row is one facade (address, orientation, store profile settings) and write one result row per facade. This lets a distributor score an entire portfolio of client locations in a single run without repeating the command for each one.
+
+```
+address, facade_azimuth, operating_hours, altitude_m  →  level, score, film_type, peak_month
+```
+
+---
+
+### Configurable variable weights
+
+Currently the intensity formula and recommendation thresholds are fixed. A future version would expose a `--weights` flag (or a small YAML/JSON config file) so the user can tune how much each factor contributes to the final score:
+
+- **Altitude boost factor** (default: +4% per 300 m)
+- **Peak-hour multipliers** (default: ×1.5 and ×1.3)
+- **Recommendation thresholds** (the score bands that separate NONE / LOW / MODERATE / HIGH / CRITICAL)
+
+This is useful when a specific market or client has different comfort standards — e.g. a medical facility may want stricter thresholds than a supermarket.
+
+---
+
+### Sensitivity / impact analysis
+
+Run the simulation multiple times, each time switching off one variable, and report how much the score moves. Example output:
+
+```
+Variable removed          Score delta   Impact
+────────────────────────  ───────────   ──────
+Altitude correction       −142  (−11%)  High
+Operating hours filter    +208  (+16%)  High
+Building obstructions     −18   (−1%)   Low     ← safe to ignore
+Peak-hour weighting       +95   (+7%)   Medium
+```
+
+This tells the user which data inputs actually matter for this specific location and which can be skipped on a quick assessment.
+
+---
+
+### Report export — PDF and JSON
+
+- **JSON**: machine-readable output consumable by CRM tools, quoting systems, or field tablets without screen-scraping the text report.
+- **PDF**: formatted leave-behind document for the client visit, including the recommendation, monthly exposure table, and a diagram of the facade orientation.
+
+---
+
+### Monthly exposure heatmap
+
+A grid of **hour of day × month** showing the intensity-weighted sun exposure per cell. Helps the sales conversation: instead of a single annual number, the client sees exactly *when* the sun is worst and can decide whether a seasonal solution (e.g. external awning in summer) is enough or year-round film is needed.
+
+```
+       Jan  Feb  Mar  Apr  May  Jun  Jul  Aug  Sep  Oct  Nov  Dec
+08:00   ·    ·    ░    ░    ▒    ▒    ▒    ▒    ░    ░    ·    ·
+10:00   ░    ░    ▒    ▒    █    █    █    █    ▒    ▒    ░    ░
+12:00   ▒    ▒    █    █    █    █    █    █    █    █    ▒    ▒
+14:00   ▒    ▒    █    █    █    ░    ░    █    █    █    ▒    ▒
+16:00   ░    ░    ▒    ▒    ░    ·    ·    ░    ▒    ▒    ░    ░
+```
+
+---
+
+### Weather / cloud cover integration
+
+The current model assumes a permanently clear sky, which overestimates exposure in cloudy climates. Integrating **Typical Meteorological Year (TMY)** datasets from NREL or EnergyPlus would multiply each hourly sample by the historical cloud-clearness index for that location, producing a score that reflects real annual conditions rather than the theoretical maximum.
+
+---
+
+### Existing glass type input
+
+A single-pane clear window transmits ~87% of solar heat. A double-pane low-e window transmits ~25%. Knowing the current glazing lets the tool calculate only the *additional* protection the film needs to provide and recommend a lighter product when the glass already does part of the job.
+
+| Glazing | Solar heat gain coefficient | Notes |
+|---|---|---|
+| Single clear | ~0.86 | Baseline |
+| Double clear | ~0.70 | Common in commercial buildings |
+| Double low-e | ~0.25–0.40 | Already reduces heat significantly |
+| Triple low-e | ~0.15–0.25 | May need only decorative tint |
+
+---
+
+### ROI / energy savings estimate
+
+Translate the exposure score into an approximate cooling-load reduction after film installation, expressed in kWh/year and local electricity cost. This gives the sales conversation a concrete payback period: "at your local electricity rate, the film pays for itself in X months."
+
+Inputs needed: floor area behind the window, local electricity tariff, and the solar heat gain coefficient of the recommended film.
+
+---
+
+### REST API
+
+A thin **FastAPI** wrapper around `ExposureCalculator` would let CRM platforms, quoting apps, and field tablets call the model programmatically without running Python locally.
+
+```
+POST /analyse
+{
+  "address": "Gran Via 1, Madrid",
+  "auto": true,
+  "operating_hours": [11, 21],
+  "peak_weights": true
+}
+→ { "facades": [ { "direction": "SE", "level": "HIGH", "film": "Prestige medium", ... } ] }
+```
+
+---
+
+### Before / after comparison mode
+
+Run the simulation twice — once with the current site as-is, once with the recommended film's solar heat gain coefficient applied — and show the score delta and new recommendation level. Useful for demonstrating to a client that a specific product will bring them from CRITICAL to MODERATE, for example.
