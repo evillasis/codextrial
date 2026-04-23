@@ -34,6 +34,7 @@ RETAIL STORE ANALYSIS
 
 import argparse
 import sys
+from datetime import datetime
 
 from sun_exposure import (
     Building,
@@ -125,7 +126,7 @@ def parse_args():
     )
 
     # --- Simulation settings ---
-    p.add_argument("--year", type=int, default=2025, help="Year to simulate (default: 2025)")
+    p.add_argument("--year", type=int, default=datetime.now().year, help="Year to simulate (default: current year)")
     p.add_argument(
         "--day-step",
         type=int,
@@ -312,32 +313,20 @@ def main():
         parts = [float(x) for x in pw_str.split(",")]
         custom_peaks.append((parts[0], parts[1], parts[2]))
 
-    # 7. Build StoreProfile (only when at least one retail/site arg is active)
-    use_profile = (
-        altitude_m != 0.0
-        or operating_hours != (0.0, 24.0)
-        or obs_list
-        or args.peak_weights
-        or custom_peaks
-        or args.entry_azimuth is not None
-        or args.queue_azimuth is not None
+    # 7. Always build StoreProfile — documented defaults apply when flags are absent
+    peak_windows = custom_peaks if custom_peaks else [(13.0, 15.0, 1.5), (18.0, 20.0, 1.3)]
+    store_profile = StoreProfile(
+        altitude_m=altitude_m,
+        operating_hours=operating_hours,
+        peak_windows=peak_windows,
+        apply_peak_weights=args.peak_weights or bool(custom_peaks),
+        obstructions=ObstructionProfile(obs_list),
     )
-
-    store_profile = None
-    if use_profile:
-        peak_windows = custom_peaks if custom_peaks else [(13.0, 15.0, 1.5), (18.0, 20.0, 1.3)]
-        store_profile = StoreProfile(
-            altitude_m=altitude_m,
-            operating_hours=operating_hours,
-            peak_windows=peak_windows,
-            apply_peak_weights=args.peak_weights or bool(custom_peaks),
-            obstructions=ObstructionProfile(obs_list),
-        )
 
     # 8. Run simulation and print reports
     calc = ExposureCalculator(year=args.year, hour_step=1.0, day_step=args.day_step)
 
-    if use_profile or args.auto or args.auto_elevation or args.auto_buildings or args.auto_street:
+    if args.auto or args.auto_elevation or args.auto_buildings or args.auto_street:
         print()  # blank line before reports
 
     for building in buildings:

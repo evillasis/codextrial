@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Optional
 
+_CURRENT_YEAR = datetime.now().year
+
 from .solar_position import SolarPosition
 from .building import Building
 
@@ -56,7 +58,7 @@ class ExposureCalculator:
     day_step    : skip every N-th day to speed up (1 = every day, 7 = weekly)
     """
 
-    def __init__(self, year: int = 2025, hour_step: float = 1.0, day_step: int = 1):
+    def __init__(self, year: int = _CURRENT_YEAR, hour_step: float = 1.0, day_step: int = 1):
         self.year = year
         self.hour_step = hour_step
         self.day_step = day_step
