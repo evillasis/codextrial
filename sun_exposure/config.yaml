@@ -1,0 +1,42 @@
+# Sun Exposure Calculator — default configuration
+# Copy and edit this file to tune thresholds for a specific market.
+# Pass the custom path with: python main.py --config my_market.yaml ...
+#
+# Requires pyyaml: pip install pyyaml
+
+# ── Recommendation thresholds ─────────────────────────────────────────────────
+# The "daily_score" is the intensity-weighted annual exposure divided by 365.
+# The calculator assigns the highest level whose lower bound the score exceeds.
+#
+# Example: shift the HIGH→CRITICAL boundary from 3.5 to 2.8 for a sunny market:
+#   thresholds:
+#     high: 2.8
+thresholds:
+  none:     0.5    # below this → NONE
+  low:      1.2    # below this → LOW
+  moderate: 2.2    # below this → MODERATE
+  high:     3.5    # below this → HIGH; at or above → CRITICAL
+
+# ── Peak-hour weighting ───────────────────────────────────────────────────────
+# Each entry: [start_hour, end_hour, weight]  (local solar time, 24-h clock)
+# Hours within a window have their intensity multiplied by the weight.
+# Only active when --peak-weights is passed on the CLI.
+peak_windows:
+  - [13.0, 15.0, 1.5]   # 1–3 PM  × 1.5  (lunch rush)
+  - [18.0, 20.0, 1.3]   # 6–8 PM  × 1.3  (after-work rush)
+
+# ── Altitude irradiance boost ─────────────────────────────────────────────────
+# Solar irradiance increases with altitude due to thinner atmosphere.
+# Formula: factor = (1 + boost_factor_per_300m) ^ (altitude_m / 300)
+# Default: +4 % per 300 m.  Typical range: 0.03–0.05.
+altitude:
+  boost_factor_per_300m: 0.04
+
+# ── Film product names ────────────────────────────────────────────────────────
+# Localise or substitute product names here without touching code.
+films:
+  none:     "No film needed"
+  low:      "No film / decorative tint"
+  moderate: "3M Prestige Series (light)"
+  high:     "3M Prestige Series (medium)"
+  critical: "3M Prestige Series (dark) or Ceramic IR"

@@ -46,6 +46,7 @@ from sun_exposure import (
 )
 from sun_exposure.building import facade_from_cardinal
 from sun_exposure.recommendation import format_report
+from sun_exposure.config import load_config
 from sun_exposure.geo import (
     GeoLookupError,
     geocode,
@@ -123,6 +124,15 @@ def parse_args():
         choices=["left", "right", "both"],
         default="both",
         help="Which side of the street to analyse with --street-angle or --auto-street (default: both)",
+    )
+
+    # --- Config ---
+    p.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Path to a custom YAML config file (requires pyyaml). Overrides recommendation thresholds and peak windows.",
     )
 
     # --- Simulation settings ---
@@ -314,7 +324,9 @@ def main():
         custom_peaks.append((parts[0], parts[1], parts[2]))
 
     # 7. Always build StoreProfile — documented defaults apply when flags are absent
-    peak_windows = custom_peaks if custom_peaks else [(13.0, 15.0, 1.5), (18.0, 20.0, 1.3)]
+    cfg = load_config(args.config)
+    default_peaks = [tuple(w) for w in cfg["peak_windows"]]
+    peak_windows = custom_peaks if custom_peaks else default_peaks
     store_profile = StoreProfile(
         altitude_m=altitude_m,
         operating_hours=operating_hours,
@@ -323,15 +335,15 @@ def main():
         obstructions=ObstructionProfile(obs_list),
     )
 
-    # 8. Run simulation and print reports
-    calc = ExposureCalculator(year=args.year, hour_step=1.0, day_step=args.day_step)
+    # 8. Run simulation (cfg already loaded in step 7)
+    calc = ExposureCalculator(year=args.year, hour_step=1.0, day_step=args.day_step, config=cfg)
 
     if args.auto or args.auto_elevation or args.auto_buildings or args.auto_street:
         print()  # blank line before reports
 
     for building in buildings:
         result = calc.calculate(building, store_profile)
-        rec = recommend_protection(result)
+        rec = recommend_protection(result, config=cfg)
         print(format_report(result, rec))
         print()
 

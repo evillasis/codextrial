@@ -14,6 +14,7 @@ _CURRENT_YEAR = datetime.now().year
 
 from .solar_position import SolarPosition
 from .building import Building
+from .config import load_config
 
 
 @dataclass
@@ -58,10 +59,17 @@ class ExposureCalculator:
     day_step    : skip every N-th day to speed up (1 = every day, 7 = weekly)
     """
 
-    def __init__(self, year: int = _CURRENT_YEAR, hour_step: float = 1.0, day_step: int = 1):
+    def __init__(
+        self,
+        year: int = _CURRENT_YEAR,
+        hour_step: float = 1.0,
+        day_step: int = 1,
+        config: "dict | None" = None,
+    ):
         self.year = year
         self.hour_step = hour_step
         self.day_step = day_step
+        self.config = config if config is not None else load_config()
 
     def calculate(self, building: Building, store_profile=None) -> ExposureResult:
         """
@@ -158,9 +166,10 @@ class ExposureCalculator:
             annual_hours *= scale
             weighted_score *= scale
 
-        # Altitude correction: +4% solar irradiance per 300 m (thinner atmosphere).
+        # Altitude correction: configurable boost per 300 m.
         altitude_m = store_profile.altitude_m if store_profile else 0.0
-        altitude_factor = 1.04 ** (altitude_m / 300.0)
+        boost = self.config["altitude"]["boost_factor_per_300m"]
+        altitude_factor = (1.0 + boost) ** (altitude_m / 300.0)
         raw_weighted_score = weighted_score
         weighted_score *= altitude_factor
 

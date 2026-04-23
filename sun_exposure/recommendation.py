@@ -1,17 +1,17 @@
 """
 3M sun-protection film recommendation.
 
-Thresholds are based on industry guidance:
-  - >4 h/day peak direct sun → high UV/heat risk, protection strongly recommended
-  - 2–4 h/day → moderate, recommended for west/south-facing facades in hot climates
-  - <2 h/day → low exposure, usually not necessary
-
-The weighted_score (intensity-adjusted hours) is the primary signal because a
-facade that gets 5 h of grazing low-sun is very different from 5 h of high-noon sun.
+Thresholds and film names are loaded from config (config.yaml by default).
+Pass a custom config dict to recommend_protection() to override for a market.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Any
+
 from .exposure import ExposureResult
+from .config import DEFAULT_CONFIG, load_config
 
 
 @dataclass
@@ -23,35 +23,34 @@ class Recommendation:
     score: float
 
 
-LEVELS = {
-    "NONE":     (False, "No film needed",          "score < 150"),
-    "LOW":      (False, "No film / decorative tint","150 ≤ score < 350"),
-    "MODERATE": (True,  "3M Prestige Series (light)","350 ≤ score < 600"),
-    "HIGH":     (True,  "3M Prestige Series (medium)","600 ≤ score < 900"),
-    "CRITICAL": (True,  "3M Prestige Series (dark) or Ceramic IR","score ≥ 900"),
-}
-
-
-def recommend_protection(result: ExposureResult) -> Recommendation:
+def recommend_protection(
+    result: ExposureResult,
+    config: "dict[str, Any] | None" = None,
+) -> Recommendation:
     """
     Produce a 3M sun-protection recommendation from an ExposureResult.
-    The score used is the intensity-weighted annual score normalised per day.
-    Altitude correction is already baked into result.weighted_score.
+
+    config : optional config dict (from load_config()).  None → bundled defaults.
     """
+    cfg = config if config is not None else load_config()
+    thresholds = cfg["thresholds"]
+    films = cfg["films"]
+
     daily_score = result.weighted_score / 365
 
-    if daily_score < 0.5:
+    if daily_score < thresholds["none"]:
         level = "NONE"
-    elif daily_score < 1.2:
+    elif daily_score < thresholds["low"]:
         level = "LOW"
-    elif daily_score < 2.2:
+    elif daily_score < thresholds["moderate"]:
         level = "MODERATE"
-    elif daily_score < 3.5:
+    elif daily_score < thresholds["high"]:
         level = "HIGH"
     else:
         level = "CRITICAL"
 
-    protect, film_type, _ = LEVELS[level]
+    protect = level not in ("NONE", "LOW")
+    film_type = films[level.lower()]
 
     month_names = [
         "January", "February", "March", "April", "May", "June",
@@ -75,11 +74,17 @@ def recommend_protection(result: ExposureResult) -> Recommendation:
     )
 
 
-def format_report(result: ExposureResult, rec: Recommendation) -> str:
+def format_report(
+    result: ExposureResult,
+    rec: Recommendation,
+    version: str = "",
+) -> str:
+    from . import __version__
+    ver = version or __version__
     separator = "=" * 56
     lines = [
         separator,
-        " SUN EXPOSURE & 3M FILM RECOMMENDATION",
+        f" SUN EXPOSURE & 3M FILM RECOMMENDATION  v{ver}",
         separator,
     ]
 
