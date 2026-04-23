@@ -91,7 +91,7 @@ class Building:
 
     facade_azimuth           : degrees clockwise from North (0–360).
     address                  : human-readable label for display.
-    primary_glass_area_m2    : glazed area of the primary facade (m²); default 13.0 ().
+    primary_glass_area_m2    : glazed area of the primary facade (m²); default 13.0.
     secondary_facade_azimuth : outward azimuth of the second facade for corner stores (esquineras).
     secondary_glass_area_m2  : glazed area of the secondary facade; defaults to primary area if None.
     """
