@@ -30,6 +30,7 @@ class ExposureResult:
     altitude_factor: float = 1.0        # 1.0 = no altitude correction
     altitude_m: float = 0.0
     operating_hours: tuple = (0.0, 24.0)
+    store_type: str = "medianera"       # "medianera" | "esquinera"
 
     def summary(self) -> str:
         month_names = [
@@ -71,20 +72,13 @@ class ExposureCalculator:
         self.day_step = day_step
         self.config = config if config is not None else load_config()
 
-    def calculate(self, building: Building, store_profile=None) -> ExposureResult:
+    def _simulate_facade(self, building: Building, store_profile, solar) -> dict:
         """
-        Calculate annual sun exposure for a building facade.
-
-        store_profile : StoreProfile | None
-            When None (default), runs the baseline calculation with no
-            operating-hour filtering, no peak weighting, and no altitude
-            correction — identical to the original behaviour.
+        Run the hourly/daily accumulation loop for a single facade orientation.
+        Returns a dict of raw (pre-altitude-correction) accumulators.
         """
-        solar = SolarPosition(building.latitude, building.longitude)
-
-        monthly_totals = [0.0] * 12     # sum of daily hours per month
-        monthly_days = [0] * 12         # number of simulated days per month
-
+        monthly_totals = [0.0] * 12
+        monthly_days = [0] * 12
         annual_hours = 0.0
         weighted_score = 0.0
         peak_daily_hours = 0.0
@@ -162,16 +156,79 @@ class ExposureCalculator:
 
         # Scale up totals to account for skipped days.
         if self.day_step > 1:
-            scale = self.day_step
-            annual_hours *= scale
-            weighted_score *= scale
+            annual_hours *= self.day_step
+            weighted_score *= self.day_step
+
+        return {
+            "annual_hours": annual_hours,
+            "peak_daily_hours": peak_daily_hours,
+            "monthly_avg": monthly_avg,
+            "weighted_score": weighted_score,
+        }
+
+    def calculate(self, building: Building, store_profile=None) -> ExposureResult:
+        """
+        Calculate annual sun exposure for a building facade.
+
+        store_profile : StoreProfile | None
+            When None (default), runs the baseline calculation with no
+            operating-hour filtering, no peak weighting, and no altitude
+            correction — identical to the original behaviour.
+
+        For esquineras (store_profile.store_type == "esquinera") with a
+        secondary_facade_azimuth set on the Building, both facades are
+        simulated and the result is an area-weighted combination:
+            score = (primary × primary_area + secondary × secondary_area)
+                    / (primary_area + secondary_area)
+        """
+        solar = SolarPosition(building.latitude, building.longitude)
+        primary = self._simulate_facade(building, store_profile, solar)
+
+        store_type = store_profile.store_type if store_profile else "medianera"
+
+        if store_type == "esquinera" and building.secondary_facade_azimuth is not None:
+            sec_building = Building(
+                building.latitude,
+                building.longitude,
+                building.secondary_facade_azimuth,
+                building.address,
+            )
+            secondary = self._simulate_facade(sec_building, store_profile, solar)
+
+            p_area = building.primary_glass_area_m2
+            s_area = (
+                building.secondary_glass_area_m2
+                if building.secondary_glass_area_m2 is not None
+                else building.primary_glass_area_m2
+            )
+            total_area = p_area + s_area
+
+            annual_hours = (
+                primary["annual_hours"] * p_area + secondary["annual_hours"] * s_area
+            ) / total_area
+            peak_daily_hours = max(
+                primary["peak_daily_hours"], secondary["peak_daily_hours"]
+            )
+            raw_weighted_score = (
+                primary["weighted_score"] * p_area
+                + secondary["weighted_score"] * s_area
+            ) / total_area
+            monthly_avg = [
+                (primary["monthly_avg"][i] * p_area + secondary["monthly_avg"][i] * s_area)
+                / total_area
+                for i in range(12)
+            ]
+        else:
+            annual_hours = primary["annual_hours"]
+            peak_daily_hours = primary["peak_daily_hours"]
+            raw_weighted_score = primary["weighted_score"]
+            monthly_avg = primary["monthly_avg"]
 
         # Altitude correction: configurable boost per 300 m.
         altitude_m = store_profile.altitude_m if store_profile else 0.0
         boost = self.config["altitude"]["boost_factor_per_300m"]
         altitude_factor = (1.0 + boost) ** (altitude_m / 300.0)
-        raw_weighted_score = weighted_score
-        weighted_score *= altitude_factor
+        weighted_score = raw_weighted_score * altitude_factor
 
         peak_month = monthly_avg.index(max(monthly_avg)) + 1
 
@@ -188,4 +245,5 @@ class ExposureCalculator:
             operating_hours=(
                 store_profile.operating_hours if store_profile else (0.0, 24.0)
             ),
+            store_type=store_type,
         )

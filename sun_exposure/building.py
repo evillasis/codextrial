@@ -69,6 +69,9 @@ class StoreProfile:
     peak_windows      : list of (start_h, end_h, weight) — higher weight during busy periods
     apply_peak_weights: must be True to activate peak_windows; default False (opt-in)
     obstructions      : horizon profile for mountains or nearby buildings
+    store_type        : "medianera" (single street frontage) or "esquinera" (corner store,
+                        two exterior facades).  Only affects scoring when Building has a
+                        secondary_facade_azimuth set.
     """
 
     altitude_m: float = 0.0
@@ -78,6 +81,7 @@ class StoreProfile:
     )
     apply_peak_weights: bool = False
     obstructions: ObstructionProfile = field(default_factory=ObstructionProfile)
+    store_type: str = "medianera"
 
 
 @dataclass
@@ -85,17 +89,25 @@ class Building:
     """
     A building facade with a known GPS location and outward-facing direction.
 
-    facade_azimuth: degrees clockwise from North (0–360).
-    address: human-readable label for display.
+    facade_azimuth           : degrees clockwise from North (0–360).
+    address                  : human-readable label for display.
+    primary_glass_area_m2    : glazed area of the primary facade (m²); default 13.0 ().
+    secondary_facade_azimuth : outward azimuth of the second facade for corner stores (esquineras).
+    secondary_glass_area_m2  : glazed area of the secondary facade; defaults to primary area if None.
     """
 
     latitude: float
     longitude: float
     facade_azimuth: float  # outward normal of the window-bearing wall
     address: str = ""
+    primary_glass_area_m2: float = 13.0
+    secondary_facade_azimuth: Optional[float] = None
+    secondary_glass_area_m2: Optional[float] = None
 
     def __post_init__(self):
         self.facade_azimuth = self.facade_azimuth % 360
+        if self.secondary_facade_azimuth is not None:
+            self.secondary_facade_azimuth = self.secondary_facade_azimuth % 360
 
     @property
     def cardinal_direction(self) -> str:

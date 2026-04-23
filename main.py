@@ -198,6 +198,37 @@ def parse_args():
         help="Direction customers face at checkout — analysed as a separate zone",
     )
 
+    # --- Esquinera (corner store) ---
+    corner = p.add_argument_group("esquinera / corner store (optional)")
+    corner.add_argument(
+        "--store-type",
+        choices=["medianera", "esquinera"],
+        default="medianera",
+        help="Store type: 'medianera' (single frontage) or 'esquinera' (corner, 2 facades). "
+             "Default: medianera",
+    )
+    corner.add_argument(
+        "--secondary-azimuth",
+        type=float,
+        default=None,
+        metavar="DEGREES",
+        help="Outward azimuth of the secondary facade for esquineras (0=N, 90=E, …)",
+    )
+    corner.add_argument(
+        "--primary-glass-area",
+        type=float,
+        default=13.0,
+        metavar="M2",
+        help="Glazed area of the primary facade in m² (default: 13.0)",
+    )
+    corner.add_argument(
+        "--secondary-glass-area",
+        type=float,
+        default=None,
+        metavar="M2",
+        help="Glazed area of the secondary facade in m² (default: same as primary)",
+    )
+
     return p, p.parse_args()
 
 
@@ -279,6 +310,16 @@ def main():
     # 2. Resolve facade orientation → list of Building objects
     buildings = _resolve_orientation(args, lat, lon, parser)
 
+    # Apply esquinera / glass-area overrides to the primary building(s) returned above.
+    # Entry/queue zones are always single-facade; only the first building gets the
+    # secondary facade because street-angle mode may return two (both sides).
+    for b in buildings:
+        b.primary_glass_area_m2 = args.primary_glass_area
+        if args.secondary_azimuth is not None:
+            b.secondary_facade_azimuth = args.secondary_azimuth % 360
+        if args.secondary_glass_area is not None:
+            b.secondary_glass_area_m2 = args.secondary_glass_area
+
     # 3. Add optional entry / queue zones
     if args.entry_azimuth is not None:
         label = (args.address + " [entry]").strip()
@@ -333,6 +374,7 @@ def main():
         peak_windows=peak_windows,
         apply_peak_weights=args.peak_weights or bool(custom_peaks),
         obstructions=ObstructionProfile(obs_list),
+        store_type=args.store_type,
     )
 
     # 8. Run simulation (cfg already loaded in step 7)

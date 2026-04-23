@@ -12,6 +12,15 @@ from typing import Any
 
 from .exposure import ExposureResult
 from .config import DEFAULT_CONFIG, load_config
+from .building import CARDINAL as _CARDINAL_MAP
+
+
+def _cardinal_from_az(azimuth: float) -> str:
+    """Return the closest 16-point compass label for an azimuth."""
+    dirs = list(_CARDINAL_MAP.keys())
+    angles = list(_CARDINAL_MAP.values())
+    diff = [abs((azimuth - a + 180) % 360 - 180) for a in angles]
+    return dirs[diff.index(min(diff))]
 
 
 @dataclass
@@ -92,6 +101,24 @@ def format_report(
         lines.append(f" Address  : {result.building.address}")
     lines += [
         f" Location : {result.building.latitude:.5f}°, {result.building.longitude:.5f}°",
+    ]
+
+    if result.store_type == "esquinera" and result.building.secondary_facade_azimuth is not None:
+        b = result.building
+        s_area = (
+            b.secondary_glass_area_m2
+            if b.secondary_glass_area_m2 is not None
+            else b.primary_glass_area_m2
+        )
+        lines += [
+            f" Store type: Esquinera (corner store — 2 facades)",
+            f" Primary   : {b.cardinal_direction} ({b.facade_azimuth:.0f}°)"
+            f" — {b.primary_glass_area_m2:.1f} m² glass",
+            f" Secondary : {_cardinal_from_az(b.secondary_facade_azimuth)}"
+            f" ({b.secondary_facade_azimuth:.0f}°) — {s_area:.1f} m² glass",
+        ]
+
+    lines += [
         "",
         " --- Exposure Analysis ---",
         result.summary(),

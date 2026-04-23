@@ -210,6 +210,87 @@ class TestObstructionInExposure:
 
 
 # ---------------------------------------------------------------------------
+# Esquinera (corner store — two facades)
+# ---------------------------------------------------------------------------
+
+class TestEsquinera:
+    def test_esquinera_score_between_primary_and_secondary(self):
+        # Area-weighted average must be between the two individual scores.
+        south = Building(*MADRID, 180.0, primary_glass_area_m2=13.0,
+                         secondary_facade_azimuth=270.0, secondary_glass_area_m2=13.0)
+        calc = _calc()
+        r_south_only = calc.calculate(Building(*MADRID, 180.0), StoreProfile())
+        r_west_only  = calc.calculate(Building(*MADRID, 270.0), StoreProfile())
+        r_esq = calc.calculate(south, StoreProfile(store_type="esquinera"))
+        lo = min(r_south_only.weighted_score, r_west_only.weighted_score)
+        hi = max(r_south_only.weighted_score, r_west_only.weighted_score)
+        assert lo <= r_esq.weighted_score <= hi
+
+    def test_esquinera_scores_higher_than_west_only(self):
+        # S+W area-weighted average exceeds W-only, since S contributes a higher score.
+        south_west = Building(*MADRID, 180.0, primary_glass_area_m2=13.0,
+                              secondary_facade_azimuth=270.0, secondary_glass_area_m2=13.0)
+        calc = _calc()
+        r_esq  = calc.calculate(south_west, StoreProfile(store_type="esquinera"))
+        r_west = calc.calculate(Building(*MADRID, 270.0), StoreProfile())
+        assert r_esq.weighted_score > r_west.weighted_score
+
+    def test_esquinera_area_weighted_formula(self):
+        # Verify the exact area-weighted formula.
+        calc = _calc()
+        p_area, s_area = 13.0, 7.0
+        south_east = Building(*MADRID, 180.0, primary_glass_area_m2=p_area,
+                              secondary_facade_azimuth=90.0, secondary_glass_area_m2=s_area)
+        r_primary   = calc.calculate(Building(*MADRID, 180.0), StoreProfile())
+        r_secondary = calc.calculate(Building(*MADRID,  90.0), StoreProfile())
+        r_esq = calc.calculate(south_east, StoreProfile(store_type="esquinera"))
+
+        expected = (
+            r_primary.raw_weighted_score * p_area
+            + r_secondary.raw_weighted_score * s_area
+        ) / (p_area + s_area)
+        assert r_esq.raw_weighted_score == pytest.approx(expected, rel=0.001)
+
+    def test_medianera_ignores_secondary_azimuth(self):
+        # store_type="medianera" must ignore secondary_facade_azimuth.
+        south_with_secondary = Building(*MADRID, 180.0, secondary_facade_azimuth=270.0)
+        south_plain = Building(*MADRID, 180.0)
+        calc = _calc()
+        r_med  = calc.calculate(south_with_secondary, StoreProfile(store_type="medianera"))
+        r_base = calc.calculate(south_plain, StoreProfile())
+        assert r_med.weighted_score == pytest.approx(r_base.weighted_score, rel=1e-9)
+
+    def test_esquinera_no_secondary_azimuth_falls_back_to_primary(self):
+        # If secondary_facade_azimuth is None, esquinera behaves like medianera.
+        south = Building(*MADRID, 180.0)  # no secondary
+        calc = _calc()
+        r_esq  = calc.calculate(south, StoreProfile(store_type="esquinera"))
+        r_base = calc.calculate(south, StoreProfile())
+        assert r_esq.weighted_score == pytest.approx(r_base.weighted_score, rel=1e-9)
+
+    def test_esquinera_result_store_type_field(self):
+        south = Building(*MADRID, 180.0, secondary_facade_azimuth=270.0)
+        result = _calc().calculate(south, StoreProfile(store_type="esquinera"))
+        assert result.store_type == "esquinera"
+
+    def test_medianera_result_store_type_field(self):
+        result = _calc().calculate(Building(*MADRID, 180.0), StoreProfile())
+        assert result.store_type == "medianera"
+
+    def test_esquinera_default_secondary_area_equals_primary(self):
+        # secondary_glass_area_m2=None → treated as equal to primary_glass_area_m2.
+        p_area = 10.0
+        b_implicit = Building(*MADRID, 180.0, primary_glass_area_m2=p_area,
+                              secondary_facade_azimuth=90.0)
+        b_explicit = Building(*MADRID, 180.0, primary_glass_area_m2=p_area,
+                              secondary_facade_azimuth=90.0, secondary_glass_area_m2=p_area)
+        calc = _calc()
+        r_implicit = calc.calculate(b_implicit, StoreProfile(store_type="esquinera"))
+        r_explicit = calc.calculate(b_explicit, StoreProfile(store_type="esquinera"))
+        assert r_implicit.weighted_score == pytest.approx(r_explicit.weighted_score, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
 # Backward compatibility
 # ---------------------------------------------------------------------------
 
